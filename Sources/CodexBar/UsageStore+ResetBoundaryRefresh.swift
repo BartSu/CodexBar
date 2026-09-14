@@ -5,6 +5,15 @@ extension UsageStore {
     private struct ResetBoundaryRefreshCandidate {
         var refreshAt: Date
         var boundaryRefreshAt: Date
+        var window: ResetBoundaryWindow
+    }
+
+    /// The rate window whose reset produced a boundary refresh. Lets provider-specific follow-ups (the
+    /// opt-in Codex window keep-alive) know which window just expired without re-deriving it.
+    struct ResetBoundaryWindow: Equatable, Sendable {
+        var instanceID: ProviderInstanceID
+        var windowMinutes: Int?
+        var resetsAt: Date
     }
 
     func scheduleResetBoundaryRefreshIfNeeded(
@@ -38,11 +47,13 @@ extension UsageStore {
             let delay = max(0, refreshAt.timeIntervalSince(Date()))
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled else { return }
-            await self?.runResetBoundaryRefresh(boundaryRefreshAt: candidate.boundaryRefreshAt)
+            await self?.runResetBoundaryRefresh(
+                boundaryRefreshAt: candidate.boundaryRefreshAt,
+                window: candidate.window)
         }
     }
 
-    func runResetBoundaryRefresh(boundaryRefreshAt: Date) async {
+    func runResetBoundaryRefresh(boundaryRefreshAt: Date, window: ResetBoundaryWindow? = nil) async {
         self.resetBoundaryRefreshTask = nil
         self.scheduledResetBoundaryRefreshAt = nil
         guard Self.shouldRecordResetBoundaryAttempt(isRefreshing: self.isRefreshing) else { return }
@@ -51,6 +62,9 @@ extension UsageStore {
         await self.runRefresh(
             startupConnectivityRetryAttempt: nil,
             waitForRefreshAvailability: true)
+        if let window {
+            self.scheduleCodexWindowKeepAliveIfNeeded(after: window)
+        }
     }
 
     private func recordAttemptedResetBoundaryRefresh(_ refreshAt: Date) {
@@ -100,9 +114,10 @@ extension UsageStore {
         guard let normalRefreshInterval else { return nil }
         let normalRefreshDate = now.addingTimeInterval(normalRefreshInterval)
         let earliestAutomaticRefreshDate = minimumAutomaticRefreshInterval.map(now.addingTimeInterval)
-        return snapshots.values
-            .flatMap { snapshot in
+        return snapshots
+            .flatMap { instanceID, snapshot in
                 Self.resetBoundaryRefreshCandidates(
+                    instanceID: instanceID,
                     snapshot: snapshot,
                     now: now,
                     normalRefreshDate: normalRefreshDate,
@@ -113,6 +128,7 @@ extension UsageStore {
     }
 
     private nonisolated static func resetBoundaryRefreshCandidates(
+        instanceID: ProviderInstanceID,
         snapshot: UsageSnapshot,
         now: Date,
         normalRefreshDate: Date,
@@ -122,6 +138,10 @@ extension UsageStore {
     {
         snapshot.allRateWindows().compactMap { window in
             guard let resetsAt = window.resetsAt else { return nil }
+            let boundaryWindow = ResetBoundaryWindow(
+                instanceID: instanceID,
+                windowMinutes: window.windowMinutes,
+                resetsAt: resetsAt)
             let boundaryRefreshAt = resetsAt.addingTimeInterval(Self.resetBoundaryRefreshGraceSeconds)
             guard !attemptedBoundaryRefreshes.contains(boundaryRefreshAt) else { return nil }
             guard boundaryRefreshAt <= normalRefreshDate else { return nil }
@@ -134,7 +154,8 @@ extension UsageStore {
             guard refreshAt <= normalRefreshDate else { return nil }
             return ResetBoundaryRefreshCandidate(
                 refreshAt: refreshAt,
-                boundaryRefreshAt: boundaryRefreshAt)
+                boundaryRefreshAt: boundaryRefreshAt,
+                window: boundaryWindow)
         }
     }
 }

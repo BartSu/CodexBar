@@ -403,6 +403,12 @@ final class UsageStore {
     @ObservationIgnored var resetBoundaryRefreshTask: Task<Void, Never>?
     @ObservationIgnored var scheduledResetBoundaryRefreshAt: Date?
     @ObservationIgnored var attemptedResetBoundaryRefreshes: Set<Date> = []
+    @ObservationIgnored var attemptedCodexWindowKeepAliveBoundaries: Set<Date> = []
+    @ObservationIgnored var codexWindowKeepAliveTask: Task<Void, Never>?
+    /// Injectable so tests never launch the real Codex CLI. Provider-specific by design.
+    @ObservationIgnored var codexWindowKeepAliveRunner: @Sendable ([String: String]) async throws -> Void = {
+        try await CodexWindowKeepAliveRunner.run(environment: $0)
+    }
     @ObservationIgnored var codexPlanHistoryBackfillTask: Task<Void, Never>?
     @ObservationIgnored let historicalUsageHistoryStore: HistoricalUsageHistoryStore
     @ObservationIgnored let planUtilizationHistoryStore: PlanUtilizationHistoryStore
@@ -970,6 +976,7 @@ final class UsageStore {
         self.storageRefreshTask?.cancel()
         self.codexPlanHistoryBackfillTask?.cancel()
         self.resetBoundaryRefreshTask?.cancel()
+        self.codexWindowKeepAliveTask?.cancel()
         self.planUtilizationHistoryLoadTask?.cancel()
     }
 

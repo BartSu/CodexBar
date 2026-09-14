@@ -71,7 +71,20 @@ read_when:
   read `UsageStore.normalRefreshIntervalForHeuristics()`, which resolves adaptive mode to the current decision's
   delay — they stay active in adaptive mode rather than degrading to manual, whose interval is nil.
 
-## Optional future
-- Auto-seed a log if none exists via `codex exec --skip-git-repo-check --json "ping"` (currently not executed).
+## Codex window keep-alive (optional, off by default)
+- **Settings > Providers > Codex > Auto-start next 5h window** sends one tiny non-interactive prompt after the
+  Codex 5-hour window expires, so the next window starts immediately even while nobody is using Codex. It never
+  adds quota; it only moves the start of the next window earlier.
+- Trigger: the existing reset-boundary refresh. When the boundary that fired belongs to Codex's session window
+  (at most 12 h long) and the refreshed snapshot still shows the expired reset, `UsageStore` runs
+  `codex exec --skip-git-repo-check --sandbox read-only --json "ping"` through `CodexWindowKeepAliveRunner`
+  (`Sources/CodexBarCore/Providers/Codex/CodexWindowKeepAlive.swift`), then refreshes Codex a few seconds later.
+- Skipped when the toggle is off, Codex is disabled, Low Power Mode is on, the same boundary was already pinged, no
+  Codex snapshot exists, or the refreshed reset is already more than a minute past the expired boundary (a new
+  window already started on its own). Decision logic is the pure
+  `UsageStore.codexWindowKeepAliveSkipReason(...)`.
+- The ping uses the same executable resolution, launch-failure cooldown, and selected-account `CODEX_HOME`
+  environment as the RPC usage source, runs in a scratch directory outside any repository, and is bounded by a
+  two-minute timeout. One ping per reset costs one small request and writes one short Codex session log.
 
 See also: `docs/status.md`, `docs/ui.md`.

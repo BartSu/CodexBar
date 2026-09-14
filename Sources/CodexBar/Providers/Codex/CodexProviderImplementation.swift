@@ -95,6 +95,22 @@ struct CodexProviderImplementation: ProviderImplementation {
                 onAppDidBecomeActive: nil,
                 onAppearWhenEnabled: nil),
             ProviderSettingsToggleDescriptor(
+                id: "codex-window-keepalive",
+                title: "Auto-start next 5h window",
+                subtitle: [
+                    "Off by default.",
+                    "When the 5-hour window resets, runs one tiny `codex exec` prompt (\"ping\") so the next window",
+                    "starts immediately, even while you are not using Codex.",
+                    "Costs one small request per reset and creates a short Codex session on this Mac.",
+                ].joined(separator: " "),
+                binding: context.binding(\.codexWindowKeepAliveEnabled),
+                statusText: nil,
+                actions: [],
+                isVisible: nil,
+                onChange: nil,
+                onAppDidBecomeActive: nil,
+                onAppearWhenEnabled: nil),
+            ProviderSettingsToggleDescriptor(
                 id: "codex-historical-tracking",
                 title: "Historical tracking",
                 subtitle: historicalTrackingSubtitle,
