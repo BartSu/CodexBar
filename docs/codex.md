@@ -181,6 +181,8 @@ is limited, using additional rows when needed.
   `codex exec --skip-git-repo-check --sandbox read-only --json "ping"` once after the 5-hour window resets, so
   the next window starts immediately instead of waiting for the next real prompt. See `docs/refresh-loop.md`.
 - Uses the RPC executable resolution and the selected account's `CODEX_HOME`; one request per reset.
+- Inert (and says so under the toggle) when Refresh is Manual or an added workspace account is selected, since
+  `codex exec` cannot carry a selected workspace and would bill the `auth.json` default instead.
 
 ### Codex CLI PTY diagnostics (`/status`)
 - Manual/debug parser only; automatic background refresh and `CodexBarCLI usage --source cli` do not launch bare Codex TUI.

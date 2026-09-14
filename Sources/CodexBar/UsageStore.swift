@@ -403,6 +403,9 @@ final class UsageStore {
     @ObservationIgnored var resetBoundaryRefreshTask: Task<Void, Never>?
     @ObservationIgnored var scheduledResetBoundaryRefreshAt: Date?
     @ObservationIgnored var attemptedResetBoundaryRefreshes: Set<Date> = []
+    /// When each provider last published a snapshot from a *successful* fetch. Failure handling keeps prior
+    /// snapshots in place, so `snapshots[...]` alone cannot prove a pass fetched fresh data.
+    @ObservationIgnored var lastSnapshotPublicationAt: [ProviderInstanceID: Date] = [:]
     @ObservationIgnored var attemptedCodexWindowKeepAliveBoundaries: Set<Date> = []
     @ObservationIgnored var codexWindowKeepAliveTask: Task<Void, Never>?
     /// Injectable so tests never launch the real Codex CLI. Provider-specific by design.

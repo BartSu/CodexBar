@@ -5,6 +5,10 @@ import Testing
 
 struct CodexWindowKeepAliveTests {
     private static let resetsAt = Date(timeIntervalSince1970: 1_700_000_000)
+    /// When the boundary refresh pass started: the expired reset plus the scheduler's grace period.
+    private static let refreshStartedAt = resetsAt.addingTimeInterval(UsageStore.resetBoundaryRefreshGraceSeconds)
+    /// A Codex publication that happened during that pass.
+    private static let freshPublicationAt = refreshStartedAt.addingTimeInterval(1)
 
     @Test
     func `runner sends the documented exec ping in a read-only sandbox`() {
@@ -30,15 +34,7 @@ struct CodexWindowKeepAliveTests {
 
     @Test
     func `keep-alive runs only for the Codex session window after an expired boundary`() {
-        let reason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
-
-        #expect(reason == nil)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context()) == nil)
     }
 
     @Test
@@ -46,13 +42,8 @@ struct CodexWindowKeepAliveTests {
         let settings = testSettingsStore(suiteName: "CodexWindowKeepAliveTests-default")
 
         #expect(settings.codexWindowKeepAliveEnabled == false)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: settings.codexWindowKeepAliveEnabled,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt))) == .disabled)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(enabled: settings.codexWindowKeepAliveEnabled)) == .disabled)
     }
 
     @Test
@@ -68,65 +59,46 @@ struct CodexWindowKeepAliveTests {
 
     @Test
     func `keep-alive ignores other providers and weekly windows`() {
-        let claudeReason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(instanceID: .claude),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
-        let weeklyReason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(windowMinutes: 7 * 24 * 60),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
-        let unknownReason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(windowMinutes: nil),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
-
-        #expect(claudeReason == .notCodexSessionWindow)
-        #expect(weeklyReason == .notCodexSessionWindow)
-        #expect(unknownReason == .notCodexSessionWindow)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(window: Self.window(instanceID: .claude))) == .notCodexSessionWindow)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(window: Self.window(windowMinutes: 7 * 24 * 60))) == .notCodexSessionWindow)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(window: Self.window(windowMinutes: nil))) == .notCodexSessionWindow)
     }
 
     @Test
     func `keep-alive skips disabled provider low power and repeated boundaries`() {
-        let snapshot = Self.snapshot(primaryResetsAt: Self.resetsAt)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(codexEnabled: false)) == .codexDisabled)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(lowPowerModeEnabled: true)) == .lowPowerMode)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(attemptedBoundaries: [Self.resetsAt])) == .alreadyAttempted)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(refreshedSnapshot: nil)) == .snapshotMissing)
+    }
 
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: false,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: snapshot)) == .codexDisabled)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: true,
-            attemptedBoundaries: [],
-            refreshedSnapshot: snapshot)) == .lowPowerMode)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [Self.resetsAt],
-            refreshedSnapshot: snapshot)) == .alreadyAttempted)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: nil)) == .snapshotMissing)
+    @Test
+    func `keep-alive stays inert under Manual refresh cadence`() {
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(refreshCadenceIsManual: true)) == .manualRefreshCadence)
+    }
+
+    @Test
+    func `keep-alive rejects a selected managed workspace the CLI cannot carry`() {
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(selectedManagedWorkspaceID: "workspace-example")) == .managedWorkspaceUnsupported)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(selectedManagedWorkspaceID: "")) == nil)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(selectedManagedWorkspaceID: nil)) == nil)
+    }
+
+    @Test
+    func `keep-alive requires a Codex snapshot published by the boundary pass`() {
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(snapshotPublishedAt: nil)) == .snapshotStale)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(
+            snapshotPublishedAt: Self.refreshStartedAt.addingTimeInterval(-1))) == .snapshotStale)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(
+            snapshotPublishedAt: Self.refreshStartedAt)) == nil)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(
+            snapshotPublishedAt: Self.freshPublicationAt)) == nil)
     }
 
     @Test
@@ -135,37 +107,134 @@ struct CodexWindowKeepAliveTests {
         let stillExpired = Self.snapshot(primaryResetsAt: Self.resetsAt.addingTimeInterval(30))
         let noReset = Self.snapshot(primaryResetsAt: nil)
 
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: advanced)) == .newWindowAlreadyStarted)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: stillExpired)) == nil)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
-            enabled: true,
-            window: Self.window(),
-            codexEnabled: true,
-            lowPowerModeEnabled: false,
-            attemptedBoundaries: [],
-            refreshedSnapshot: noReset)) == nil)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(refreshedSnapshot: advanced)) == .newWindowAlreadyStarted)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(refreshedSnapshot: stillExpired)) == nil)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(refreshedSnapshot: noReset)) == nil)
+    }
+
+    @Test
+    func `pending ping is dropped when consent or the selected account changes`() {
+        let captured = ["CODEX_HOME": "/tmp/a"]
+
+        #expect(UsageStore.codexWindowKeepAliveRemainsAdmitted(
+            enabled: true, capturedEnvironment: captured, currentEnvironment: captured))
+        #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
+            enabled: false, capturedEnvironment: captured, currentEnvironment: captured))
+        #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
+            enabled: true, capturedEnvironment: captured, currentEnvironment: ["CODEX_HOME": "/tmp/b"]))
+    }
+
+    @Test
+    @MainActor
+    func `toggle explains why it is inert under Manual cadence or an added workspace`() {
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-status")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+
+        #expect(CodexProviderImplementation.windowKeepAliveStatusText(settings: settings) == nil)
+
+        settings.refreshFrequency = .manual
+        #expect(CodexProviderImplementation.windowKeepAliveStatusText(settings: settings)?.contains("Manual") == true)
+
+        settings.refreshFrequency = .fiveMinutes
+        Self.selectManagedWorkspace(in: settings)
+        #expect(settings.codexSettingsSnapshot(tokenOverride: nil).managedWorkspaceAccountID == "workspace-example")
+        #expect(CodexProviderImplementation.windowKeepAliveStatusText(settings: settings)?
+            .contains("workspace") == true)
     }
 
     @Test
     @MainActor
     func `store pings once per boundary through the injected runner`() async throws {
-        let settings = testSettingsStore(suiteName: "CodexWindowKeepAliveTests-store")
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-store")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+        let store = Self.makeStore(settings: settings)
+        let counter = PingCounter()
+        store.codexWindowKeepAliveRunner = { _ in await counter.increment() }
+        defer { store.cancelCodexWindowKeepAlive() }
+
+        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window(), refreshStartedAt: Self.storeRefreshStartedAt)
+        let firstTask = try #require(store.codexWindowKeepAliveTask)
+        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window(), refreshStartedAt: Self.storeRefreshStartedAt)
+
+        #expect(store.codexWindowKeepAliveTask == firstTask)
+        #expect(store.attemptedCodexWindowKeepAliveBoundaries == [Self.resetsAt])
+        try await Self.waitUntil { await counter.count == 1 }
+        #expect(await counter.count == 1)
+    }
+
+    @Test
+    @MainActor
+    func `store does not ping when the pass kept a stale Codex snapshot`() {
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-stale")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+        let store = Self.makeStore(settings: settings)
+        store.lastSnapshotPublicationAt[.codex] = Self.storeRefreshStartedAt.addingTimeInterval(-60)
+
+        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window(), refreshStartedAt: Self.storeRefreshStartedAt)
+
+        #expect(store.codexWindowKeepAliveTask == nil)
+        #expect(store.attemptedCodexWindowKeepAliveBoundaries.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func `store does not ping for a selected managed workspace`() {
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-workspace")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+        Self.selectManagedWorkspace(in: settings)
+        let store = Self.makeStore(settings: settings)
+
+        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window(), refreshStartedAt: Self.storeRefreshStartedAt)
+
+        #expect(store.codexWindowKeepAliveTask == nil)
+        #expect(store.attemptedCodexWindowKeepAliveBoundaries.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func `store drops a queued ping when the toggle is turned off before launch`() async throws {
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-consent")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+        let store = Self.makeStore(settings: settings)
+        let counter = PingCounter()
+        store.codexWindowKeepAliveRunner = { _ in await counter.increment() }
+        defer { store.cancelCodexWindowKeepAlive() }
+
+        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window(), refreshStartedAt: Self.storeRefreshStartedAt)
+        let task = try #require(store.codexWindowKeepAliveTask)
+        // The detached task must hop back to the main actor before launching; flipping the toggle first wins.
+        settings.codexWindowKeepAliveEnabled = false
+        await task.value
+
+        let pinged = await counter.hasPinged
+        #expect(!pinged)
+
+        store.cancelCodexWindowKeepAlive()
+        #expect(store.codexWindowKeepAliveTask == nil)
+    }
+
+    // MARK: - Helpers
+
+    /// A boundary pass that started well before `makeStore` records its Codex publication at `Date()`.
+    private static let storeRefreshStartedAt = resetsAt
+
+    @MainActor
+    private static func keepAliveSettings(suiteName: String) -> SettingsStore {
+        let settings = testSettingsStore(suiteName: suiteName)
         settings.providerDetectionCompleted = true
-        let metadata = try #require(ProviderRegistry.shared.metadata[.codex])
-        settings.setProviderEnabled(provider: .codex, metadata: metadata, enabled: true)
+        if let metadata = ProviderRegistry.shared.metadata[.codex] {
+            settings.setProviderEnabled(provider: .codex, metadata: metadata, enabled: true)
+        }
         settings.codexWindowKeepAliveEnabled = true
+        settings.refreshFrequency = .fiveMinutes
+        settings.backgroundWorkLowPowerModePreference = .off
+        settings._test_codexAccountSnapshotLoader = { _ in Self.reconciliationSnapshot(stored: nil) }
+        return settings
+    }
+
+    @MainActor
+    private static func makeStore(settings: SettingsStore) -> UsageStore {
         let store = UsageStore(
             fetcher: UsageFetcher(environment: [:]),
             browserDetection: BrowserDetection(cacheTTL: 0),
@@ -173,20 +242,60 @@ struct CodexWindowKeepAliveTests {
             startupBehavior: .testing,
             environmentBase: [:])
         store.snapshots[.codex] = Self.snapshot(primaryResetsAt: Self.resetsAt)
-        let counter = PingCounter()
-        store.codexWindowKeepAliveRunner = { _ in await counter.increment() }
-        defer { store.codexWindowKeepAliveTask?.cancel() }
+        store.lastSnapshotPublicationAt[.codex] = Date()
+        return store
+    }
 
-        guard !ProcessInfo.processInfo.isLowPowerModeEnabled else { return }
+    /// Selects an added (managed) account whose stored workspace differs from whatever its auth file names.
+    @MainActor
+    private static func selectManagedWorkspace(in settings: SettingsStore) {
+        let stored = ManagedCodexAccount(
+            id: UUID(),
+            email: "account@example.com",
+            providerAccountID: "workspace-example",
+            managedHomePath: "/tmp/codexbar-window-keepalive-tests/managed",
+            createdAt: 1,
+            updatedAt: 1,
+            lastAuthenticatedAt: 1)
+        let snapshot = Self.reconciliationSnapshot(stored: stored)
+        settings._test_codexAccountSnapshotLoader = { _ in snapshot }
+        settings.codexActiveSource = .managedAccount(id: stored.id)
+    }
 
-        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window())
-        let firstTask = try #require(store.codexWindowKeepAliveTask)
-        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window())
+    private static func reconciliationSnapshot(stored: ManagedCodexAccount?) -> CodexAccountReconciliationSnapshot {
+        CodexAccountReconciliationSnapshot(
+            storedAccounts: stored.map { [$0] } ?? [],
+            activeStoredAccount: stored,
+            liveSystemAccount: nil,
+            matchingStoredAccountForLiveSystemAccount: nil,
+            activeSource: stored.map { .managedAccount(id: $0.id) } ?? .liveSystem,
+            hasUnreadableAddedAccountStore: false,
+            storedAccountRuntimeIdentities: stored.map { [$0.id: .providerAccount(id: "workspace-example")] } ?? [:])
+    }
 
-        #expect(store.codexWindowKeepAliveTask == firstTask)
-        #expect(store.attemptedCodexWindowKeepAliveBoundaries == [Self.resetsAt])
-        try await Self.waitUntil { await counter.count == 1 }
-        #expect(await counter.count == 1)
+    private static func context(
+        enabled: Bool = true,
+        window: UsageStore.ResetBoundaryWindow = Self.window(),
+        codexEnabled: Bool = true,
+        refreshCadenceIsManual: Bool = false,
+        lowPowerModeEnabled: Bool = false,
+        selectedManagedWorkspaceID: String? = nil,
+        attemptedBoundaries: Set<Date> = [],
+        refreshedSnapshot: UsageSnapshot? = Self.snapshot(primaryResetsAt: Self.resetsAt),
+        refreshStartedAt: Date = Self.refreshStartedAt,
+        snapshotPublishedAt: Date? = Self.freshPublicationAt) -> UsageStore.CodexWindowKeepAliveContext
+    {
+        UsageStore.CodexWindowKeepAliveContext(
+            enabled: enabled,
+            window: window,
+            codexEnabled: codexEnabled,
+            refreshCadenceIsManual: refreshCadenceIsManual,
+            lowPowerModeEnabled: lowPowerModeEnabled,
+            selectedManagedWorkspaceID: selectedManagedWorkspaceID,
+            attemptedBoundaries: attemptedBoundaries,
+            refreshedSnapshot: refreshedSnapshot,
+            refreshStartedAt: refreshStartedAt,
+            snapshotPublishedAt: snapshotPublishedAt)
     }
 
     private static func waitUntil(
@@ -228,8 +337,10 @@ struct CodexWindowKeepAliveTests {
 
 private actor PingCounter {
     private(set) var count = 0
+    private(set) var hasPinged = false
 
     func increment() {
         self.count += 1
+        self.hasPinged = true
     }
 }

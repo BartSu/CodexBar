@@ -3,7 +3,7 @@
 ## 0.60.3 — Unreleased
 
 ### Added
-- Codex: optional **Auto-start next 5h window** provider setting (off by default) that sends one tiny `codex exec` ping after the 5-hour window resets, so the next window starts immediately even while idle.
+- Codex: optional **Auto-start next 5h window** provider setting (off by default) that sends one tiny `codex exec` ping after the 5-hour window resets, so the next window starts immediately even while idle. The ping only runs after a fresh successful Codex refresh for the system login, honors the Background Work Low Power Mode preference, and is disabled under Manual refresh or for added workspace accounts.
 
 ### Fixed
 - Updates: recognize Homebrew-managed apps in `/Applications` and show the existing Homebrew update instruction, while preserving Sparkle updates for separate app copies (#3647). Thanks @fanwenlin!

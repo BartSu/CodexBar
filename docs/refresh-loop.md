@@ -79,10 +79,18 @@ read_when:
   (at most 12 h long) and the refreshed snapshot still shows the expired reset, `UsageStore` runs
   `codex exec --skip-git-repo-check --sandbox read-only --json "ping"` through `CodexWindowKeepAliveRunner`
   (`Sources/CodexBarCore/Providers/Codex/CodexWindowKeepAlive.swift`), then refreshes Codex a few seconds later.
-- Skipped when the toggle is off, Codex is disabled, Low Power Mode is on, the same boundary was already pinged, no
-  Codex snapshot exists, or the refreshed reset is already more than a minute past the expired boundary (a new
-  window already started on its own). Decision logic is the pure
+- Skipped when the toggle is off, Codex is disabled, Refresh is set to Manual (no reset-boundary task exists, so
+  the toggle is greyed out and explains itself), the resolved Background Work Low Power Mode preference is on, an
+  added (managed) workspace account is selected, the same boundary was already pinged, no Codex snapshot exists,
+  the boundary pass did not publish a *fresh* Codex snapshot (a failed fetch keeps the prior one, which proves
+  nothing about the current window), or the refreshed reset is already more than a minute past the expired
+  boundary (a new window already started on its own). Decision logic is the pure
   `UsageStore.codexWindowKeepAliveSkipReason(...)`.
+- Workspace admission mirrors `CodexOAuthNativeRefreshCLIStrategy`: `codex exec` only receives `CODEX_HOME`, so it
+  would bill whatever workspace `auth.json` names rather than the selected one. Any non-nil
+  `managedWorkspaceAccountID` keeps the ping off.
+- Consent is re-checked on the main actor right before the CLI launches: turning the toggle off (which also cancels
+  the queued task) or switching the selected Codex account after the boundary fired drops the pending request.
 - The ping uses the same executable resolution, launch-failure cooldown, and selected-account `CODEX_HOME`
   environment as the RPC usage source, runs in a scratch directory outside any repository, and is bounded by a
   two-minute timeout. One ping per reset costs one small request and writes one short Codex session log.

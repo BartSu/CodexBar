@@ -59,11 +59,12 @@ extension UsageStore {
         guard Self.shouldRecordResetBoundaryAttempt(isRefreshing: self.isRefreshing) else { return }
         // Mark the boundary before the pass so runRefresh cannot schedule the same stale boundary again.
         self.recordAttemptedResetBoundaryRefresh(boundaryRefreshAt)
+        let refreshStartedAt = Date()
         await self.runRefresh(
             startupConnectivityRetryAttempt: nil,
             waitForRefreshAvailability: true)
         if let window {
-            self.scheduleCodexWindowKeepAliveIfNeeded(after: window)
+            self.scheduleCodexWindowKeepAliveIfNeeded(after: window, refreshStartedAt: refreshStartedAt)
         }
     }
 

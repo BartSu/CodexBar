@@ -102,12 +102,18 @@ struct CodexProviderImplementation: ProviderImplementation {
                     "When the 5-hour window resets, runs one tiny `codex exec` prompt (\"ping\") so the next window",
                     "starts immediately, even while you are not using Codex.",
                     "Costs one small request per reset and creates a short Codex session on this Mac.",
+                    "Needs an automatic refresh cadence (not Manual) and the system Codex login;",
+                    "it stays off for added workspace accounts.",
                 ].joined(separator: " "),
                 binding: context.binding(\.codexWindowKeepAliveEnabled),
-                statusText: nil,
+                statusText: { Self.windowKeepAliveStatusText(settings: context.settings) },
                 actions: [],
                 isVisible: nil,
-                onChange: nil,
+                isEnabled: { context.settings.refreshFrequency != .manual },
+                onChange: { enabled in
+                    guard !enabled else { return }
+                    context.store.cancelCodexWindowKeepAlive()
+                },
                 onAppDidBecomeActive: nil,
                 onAppearWhenEnabled: nil),
             ProviderSettingsToggleDescriptor(
@@ -310,5 +316,19 @@ struct CodexProviderImplementation: ProviderImplementation {
     func runLoginFlow(context: ProviderLoginContext) async -> Bool {
         await context.controller.runCodexLoginFlow()
         return true
+    }
+
+    /// Explains why an enabled keep-alive toggle is currently inert; nil when the ping can actually run.
+    @MainActor
+    static func windowKeepAliveStatusText(settings: SettingsStore) -> String? {
+        if settings.refreshFrequency == .manual {
+            return "Inactive while Refresh is set to Manual: the window reset is only detected by automatic refreshes."
+        }
+        if let workspaceID = settings.codexSettingsSnapshot(tokenOverride: nil).managedWorkspaceAccountID,
+           !workspaceID.isEmpty
+        {
+            return "Inactive for the selected added workspace account: `codex exec` can only use the system login."
+        }
+        return nil
     }
 }
