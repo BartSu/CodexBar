@@ -409,6 +409,7 @@ final class UsageStore {
     @ObservationIgnored var codexWindowKeepAliveRunner: @Sendable ([String: String]) async throws -> Void = {
         try await CodexWindowKeepAliveRunner.run(environment: $0)
     }
+
     @ObservationIgnored var codexPlanHistoryBackfillTask: Task<Void, Never>?
     @ObservationIgnored let historicalUsageHistoryStore: HistoricalUsageHistoryStore
     @ObservationIgnored let planUtilizationHistoryStore: PlanUtilizationHistoryStore

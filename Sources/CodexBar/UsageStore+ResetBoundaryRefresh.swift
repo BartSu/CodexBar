@@ -115,10 +115,9 @@ extension UsageStore {
         let normalRefreshDate = now.addingTimeInterval(normalRefreshInterval)
         let earliestAutomaticRefreshDate = minimumAutomaticRefreshInterval.map(now.addingTimeInterval)
         return snapshots
-            .flatMap { instanceID, snapshot in
+            .flatMap { entry in
                 Self.resetBoundaryRefreshCandidates(
-                    instanceID: instanceID,
-                    snapshot: snapshot,
+                    entry: entry,
                     now: now,
                     normalRefreshDate: normalRefreshDate,
                     earliestAutomaticRefreshDate: earliestAutomaticRefreshDate,
@@ -128,18 +127,18 @@ extension UsageStore {
     }
 
     private nonisolated static func resetBoundaryRefreshCandidates(
-        instanceID: ProviderInstanceID,
-        snapshot: UsageSnapshot,
+        entry: (key: ProviderInstanceID, value: UsageSnapshot),
         now: Date,
         normalRefreshDate: Date,
         earliestAutomaticRefreshDate: Date?,
         attemptedBoundaryRefreshes: Set<Date>)
         -> [ResetBoundaryRefreshCandidate]
     {
-        snapshot.allRateWindows().compactMap { window in
+        let snapshot = entry.value
+        return snapshot.allRateWindows().compactMap { window in
             guard let resetsAt = window.resetsAt else { return nil }
             let boundaryWindow = ResetBoundaryWindow(
-                instanceID: instanceID,
+                instanceID: entry.key,
                 windowMinutes: window.windowMinutes,
                 resetsAt: resetsAt)
             let boundaryRefreshAt = resetsAt.addingTimeInterval(Self.resetBoundaryRefreshGraceSeconds)

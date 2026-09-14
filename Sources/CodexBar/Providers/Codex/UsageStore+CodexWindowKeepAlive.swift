@@ -21,24 +21,30 @@ extension UsageStore {
         case newWindowAlreadyStarted
     }
 
+    /// Everything the pure decision needs, gathered by `scheduleCodexWindowKeepAliveIfNeeded` from live state.
+    struct CodexWindowKeepAliveContext: Sendable {
+        var enabled: Bool
+        var window: ResetBoundaryWindow
+        var codexEnabled: Bool
+        var lowPowerModeEnabled: Bool
+        var attemptedBoundaries: Set<Date>
+        var refreshedSnapshot: UsageSnapshot?
+    }
+
     /// Pure decision so the trigger is testable without launching anything. Returns `nil` when the ping should run.
     nonisolated static func codexWindowKeepAliveSkipReason(
-        enabled: Bool,
-        window: ResetBoundaryWindow,
-        codexEnabled: Bool,
-        lowPowerModeEnabled: Bool,
-        attemptedBoundaries: Set<Date>,
-        refreshedSnapshot: UsageSnapshot?) -> CodexWindowKeepAliveSkipReason?
+        _ context: CodexWindowKeepAliveContext) -> CodexWindowKeepAliveSkipReason?
     {
-        guard enabled else { return .disabled }
+        guard context.enabled else { return .disabled }
+        let window = context.window
         guard window.instanceID == .codex,
               let windowMinutes = window.windowMinutes,
               windowMinutes <= self.codexWindowKeepAliveMaximumWindowMinutes
         else { return .notCodexSessionWindow }
-        guard codexEnabled else { return .codexDisabled }
-        guard !lowPowerModeEnabled else { return .lowPowerMode }
-        guard !attemptedBoundaries.contains(window.resetsAt) else { return .alreadyAttempted }
-        guard let refreshedSnapshot else { return .snapshotMissing }
+        guard context.codexEnabled else { return .codexDisabled }
+        guard !context.lowPowerModeEnabled else { return .lowPowerMode }
+        guard !context.attemptedBoundaries.contains(window.resetsAt) else { return .alreadyAttempted }
+        guard let refreshedSnapshot = context.refreshedSnapshot else { return .snapshotMissing }
         if let refreshedResetsAt = refreshedSnapshot.primary?.resetsAt,
            refreshedResetsAt.timeIntervalSince(window.resetsAt) > self.codexWindowKeepAliveResetToleranceSeconds
         {
@@ -49,13 +55,13 @@ extension UsageStore {
 
     func scheduleCodexWindowKeepAliveIfNeeded(after window: ResetBoundaryWindow) {
         let logger = CodexBarLog.logger(LogCategories.provider(.codex, scope: "window-keepalive"))
-        if let reason = Self.codexWindowKeepAliveSkipReason(
+        if let reason = Self.codexWindowKeepAliveSkipReason(CodexWindowKeepAliveContext(
             enabled: self.settings.codexWindowKeepAliveEnabled,
             window: window,
             codexEnabled: self.isEnabled(.codex),
             lowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
             attemptedBoundaries: self.attemptedCodexWindowKeepAliveBoundaries,
-            refreshedSnapshot: self.snapshots[.codex])
+            refreshedSnapshot: self.snapshots[.codex]))
         {
             if reason != .disabled, reason != .notCodexSessionWindow {
                 logger.debug("Codex window keep-alive skipped", metadata: ["reason": "\(reason)"])

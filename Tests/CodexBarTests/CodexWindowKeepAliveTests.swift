@@ -30,13 +30,13 @@ struct CodexWindowKeepAliveTests {
 
     @Test
     func `keep-alive runs only for the Codex session window after an expired boundary`() {
-        let reason = UsageStore.codexWindowKeepAliveSkipReason(
+        let reason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt))
+            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
 
         #expect(reason == nil)
     }
@@ -46,18 +46,18 @@ struct CodexWindowKeepAliveTests {
         let settings = testSettingsStore(suiteName: "CodexWindowKeepAliveTests-default")
 
         #expect(settings.codexWindowKeepAliveEnabled == false)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: settings.codexWindowKeepAliveEnabled,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)) == .disabled)
+            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt))) == .disabled)
     }
 
     @Test
-    func `setting persists to user defaults`() {
-        let defaults = UserDefaults(suiteName: "CodexWindowKeepAliveTests-persist-\(UUID().uuidString)")!
+    func `setting persists to user defaults`() throws {
+        let defaults = try #require(UserDefaults(suiteName: "CodexWindowKeepAliveTests-persist-\(UUID().uuidString)"))
         let settings = testSettingsStore(suiteName: "CodexWindowKeepAliveTests-persist", userDefaults: defaults)
 
         settings.codexWindowKeepAliveEnabled = true
@@ -68,27 +68,27 @@ struct CodexWindowKeepAliveTests {
 
     @Test
     func `keep-alive ignores other providers and weekly windows`() {
-        let claudeReason = UsageStore.codexWindowKeepAliveSkipReason(
+        let claudeReason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(instanceID: .claude),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt))
-        let weeklyReason = UsageStore.codexWindowKeepAliveSkipReason(
+            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
+        let weeklyReason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(windowMinutes: 7 * 24 * 60),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt))
-        let unknownReason = UsageStore.codexWindowKeepAliveSkipReason(
+            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
+        let unknownReason = UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(windowMinutes: nil),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt))
+            refreshedSnapshot: Self.snapshot(primaryResetsAt: Self.resetsAt)))
 
         #expect(claudeReason == .notCodexSessionWindow)
         #expect(weeklyReason == .notCodexSessionWindow)
@@ -99,34 +99,34 @@ struct CodexWindowKeepAliveTests {
     func `keep-alive skips disabled provider low power and repeated boundaries`() {
         let snapshot = Self.snapshot(primaryResetsAt: Self.resetsAt)
 
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: false,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: snapshot) == .codexDisabled)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            refreshedSnapshot: snapshot)) == .codexDisabled)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: true,
             attemptedBoundaries: [],
-            refreshedSnapshot: snapshot) == .lowPowerMode)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            refreshedSnapshot: snapshot)) == .lowPowerMode)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [Self.resetsAt],
-            refreshedSnapshot: snapshot) == .alreadyAttempted)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            refreshedSnapshot: snapshot)) == .alreadyAttempted)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: nil) == .snapshotMissing)
+            refreshedSnapshot: nil)) == .snapshotMissing)
     }
 
     @Test
@@ -135,27 +135,27 @@ struct CodexWindowKeepAliveTests {
         let stillExpired = Self.snapshot(primaryResetsAt: Self.resetsAt.addingTimeInterval(30))
         let noReset = Self.snapshot(primaryResetsAt: nil)
 
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: advanced) == .newWindowAlreadyStarted)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            refreshedSnapshot: advanced)) == .newWindowAlreadyStarted)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: stillExpired) == nil)
-        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            refreshedSnapshot: stillExpired)) == nil)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(UsageStore.CodexWindowKeepAliveContext(
             enabled: true,
             window: Self.window(),
             codexEnabled: true,
             lowPowerModeEnabled: false,
             attemptedBoundaries: [],
-            refreshedSnapshot: noReset) == nil)
+            refreshedSnapshot: noReset)) == nil)
     }
 
     @Test
@@ -209,7 +209,7 @@ struct CodexWindowKeepAliveTests {
         UsageStore.ResetBoundaryWindow(
             instanceID: instanceID,
             windowMinutes: windowMinutes,
-            resetsAt: Self.resetsAt)
+            resetsAt: self.resetsAt)
     }
 
     private static func snapshot(primaryResetsAt: Date?) -> UsageSnapshot {
@@ -221,7 +221,7 @@ struct CodexWindowKeepAliveTests {
                 resetDescription: nil),
             secondary: nil,
             tertiary: nil,
-            updatedAt: Self.resetsAt.addingTimeInterval(UsageStore.resetBoundaryRefreshGraceSeconds),
+            updatedAt: self.resetsAt.addingTimeInterval(UsageStore.resetBoundaryRefreshGraceSeconds),
             identity: nil)
     }
 }
