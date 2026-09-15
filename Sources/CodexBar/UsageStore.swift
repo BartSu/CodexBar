@@ -413,6 +413,10 @@ final class UsageStore {
         try await CodexWindowKeepAliveRunner.run(environment: $0)
     }
 
+    /// Injectable so tests bind the ping to a synthetic login instead of reading a real `auth.json`.
+    @ObservationIgnored var codexWindowKeepAliveAuthorityLoader: @Sendable ([String: String])
+        -> CodexWindowKeepAliveAuthority? = { UsageStore.loadCodexWindowKeepAliveAuthority(environment: $0) }
+
     @ObservationIgnored var codexPlanHistoryBackfillTask: Task<Void, Never>?
     @ObservationIgnored let historicalUsageHistoryStore: HistoricalUsageHistoryStore
     @ObservationIgnored let planUtilizationHistoryStore: PlanUtilizationHistoryStore

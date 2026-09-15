@@ -114,15 +114,70 @@ struct CodexWindowKeepAliveTests {
     }
 
     @Test
-    func `pending ping is dropped when consent or the selected account changes`() {
-        let captured = ["CODEX_HOME": "/tmp/a"]
+    func `keep-alive only spends a readable ChatGPT subscription login`() {
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(authority: nil)) == .loginUnavailable)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(
+            Self.context(authority: Self.authority(isAPIKeyLogin: true))) == .apiKeyLoginUnsupported)
+        #expect(UsageStore.codexWindowKeepAliveSkipReason(Self.context(authority: Self.authority())) == nil)
+    }
+
+    @Test
+    func `pending ping is dropped when consent the selected account or the same-home login changes`() {
+        let captured = Self.authority()
 
         #expect(UsageStore.codexWindowKeepAliveRemainsAdmitted(
-            enabled: true, capturedEnvironment: captured, currentEnvironment: captured))
+            enabled: true, capturedAuthority: captured, currentAuthority: captured))
         #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
-            enabled: false, capturedEnvironment: captured, currentEnvironment: captured))
+            enabled: false, capturedAuthority: captured, currentAuthority: captured))
+        // Selected account switched: different CODEX_HOME.
         #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
-            enabled: true, capturedEnvironment: captured, currentEnvironment: ["CODEX_HOME": "/tmp/b"]))
+            enabled: true,
+            capturedAuthority: captured,
+            currentAuthority: Self.authority(environment: ["CODEX_HOME": "/tmp/codexbar-keepalive-tests/b"])))
+        // Replacement login in the same home: same environment, different auth.json bytes.
+        #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
+            enabled: true,
+            capturedAuthority: captured,
+            currentAuthority: Self.authority(authFingerprint: "fingerprint-b")))
+        // Same file bytes but a different account claim (defense in depth).
+        #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
+            enabled: true,
+            capturedAuthority: captured,
+            currentAuthority: Self.authority(accountID: "account-b")))
+        // Login swapped to an API key, or signed out entirely.
+        #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
+            enabled: true, capturedAuthority: captured, currentAuthority: Self.authority(isAPIKeyLogin: true)))
+        #expect(!UsageStore.codexWindowKeepAliveRemainsAdmitted(
+            enabled: true, capturedAuthority: captured, currentAuthority: nil))
+    }
+
+    @Test(CodexCredentialFixtures())
+    func `authority loader reads the login codex exec would spend and fails closed`() throws {
+        let home = CodexCredentialFixtures.root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let env = ["CODEX_HOME": home.path]
+
+        #expect(UsageStore.loadCodexWindowKeepAliveAuthority(environment: env) == nil)
+
+        try CodexOAuthCredentialsStore.save(
+            CodexOAuthCredentials(
+                accessToken: "access-token",
+                refreshToken: "refresh-token",
+                idToken: nil,
+                accountId: "account-a",
+                lastRefresh: Date()),
+            env: env)
+        let chatGPT = try #require(UsageStore.loadCodexWindowKeepAliveAuthority(environment: env))
+        #expect(chatGPT.environment == env)
+        #expect(chatGPT.accountID == "account-a")
+        #expect(!chatGPT.isAPIKeyLogin)
+        #expect(chatGPT.authFingerprint == CodexAuthFingerprint.fingerprint(homePath: home.path))
+
+        let apiKeyJSON = try JSONSerialization.data(withJSONObject: ["OPENAI_API_KEY": "sk-test-not-a-real-key"])
+        try apiKeyJSON.write(to: home.appendingPathComponent("auth.json"))
+        let apiKey = try #require(UsageStore.loadCodexWindowKeepAliveAuthority(environment: env))
+        #expect(apiKey.isAPIKeyLogin)
+        #expect(apiKey.authFingerprint != chatGPT.authFingerprint)
     }
 
     @Test
@@ -131,16 +186,27 @@ struct CodexWindowKeepAliveTests {
         let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-status")
         defer { settings._test_codexAccountSnapshotLoader = nil }
 
-        #expect(CodexProviderImplementation.windowKeepAliveStatusText(settings: settings) == nil)
+        let chatGPT = Self.authority()
+        #expect(Self.statusText(settings, authority: chatGPT) == nil)
 
         settings.refreshFrequency = .manual
-        #expect(CodexProviderImplementation.windowKeepAliveStatusText(settings: settings)?.contains("Manual") == true)
+        #expect(Self.statusText(settings, authority: chatGPT)?.contains("Manual") == true)
 
         settings.refreshFrequency = .fiveMinutes
         Self.selectManagedWorkspace(in: settings)
         #expect(settings.codexSettingsSnapshot(tokenOverride: nil).managedWorkspaceAccountID == "workspace-example")
-        #expect(CodexProviderImplementation.windowKeepAliveStatusText(settings: settings)?
-            .contains("workspace") == true)
+        #expect(Self.statusText(settings, authority: chatGPT)?.contains("workspace") == true)
+    }
+
+    @Test
+    @MainActor
+    func `toggle explains why it is inert for API key or missing logins`() {
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-status-login")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+
+        #expect(Self.statusText(settings, authority: Self.authority(isAPIKeyLogin: true))?
+            .contains("API key") == true)
+        #expect(Self.statusText(settings, authority: nil)?.contains("signed in") == true)
     }
 
     @Test
@@ -189,6 +255,42 @@ struct CodexWindowKeepAliveTests {
 
         #expect(store.codexWindowKeepAliveTask == nil)
         #expect(store.attemptedCodexWindowKeepAliveBoundaries.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func `store does not ping for an API key login`() {
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-apikey")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+        let store = Self.makeStore(settings: settings)
+        store.codexWindowKeepAliveAuthorityLoader = { Self.authority(environment: $0, isAPIKeyLogin: true) }
+
+        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window(), refreshStartedAt: Self.storeRefreshStartedAt)
+
+        #expect(store.codexWindowKeepAliveTask == nil)
+        #expect(store.attemptedCodexWindowKeepAliveBoundaries.isEmpty)
+    }
+
+    @Test
+    @MainActor
+    func `store drops a queued ping when the login in the same home changes before launch`() async throws {
+        let settings = Self.keepAliveSettings(suiteName: "CodexWindowKeepAliveTests-login-change")
+        defer { settings._test_codexAccountSnapshotLoader = nil }
+        let store = Self.makeStore(settings: settings)
+        let counter = PingCounter()
+        store.codexWindowKeepAliveRunner = { _ in await counter.increment() }
+        defer { store.cancelCodexWindowKeepAlive() }
+
+        store.scheduleCodexWindowKeepAliveIfNeeded(after: Self.window(), refreshStartedAt: Self.storeRefreshStartedAt)
+        let task = try #require(store.codexWindowKeepAliveTask)
+        // Same CODEX_HOME, different auth.json: the launch-time re-check must reject the replacement login.
+        store.codexWindowKeepAliveAuthorityLoader = {
+            Self.authority(environment: $0, authFingerprint: "fingerprint-b", accountID: "account-b")
+        }
+        await task.value
+
+        let pinged = await counter.hasPinged
+        #expect(!pinged)
     }
 
     @Test
@@ -243,7 +345,30 @@ struct CodexWindowKeepAliveTests {
             environmentBase: [:])
         store.snapshots[.codex] = Self.snapshot(primaryResetsAt: Self.resetsAt)
         store.lastSnapshotPublicationAt[.codex] = Date()
+        store.codexWindowKeepAliveAuthorityLoader = { Self.authority(environment: $0) }
         return store
+    }
+
+    @MainActor
+    private static func statusText(
+        _ settings: SettingsStore,
+        authority: UsageStore.CodexWindowKeepAliveAuthority?) -> String?
+    {
+        CodexProviderImplementation.windowKeepAliveStatusText(settings: settings, loginAuthority: { authority })
+    }
+
+    /// A synthetic ChatGPT login; tests never read a real `auth.json`.
+    private static func authority(
+        environment: [String: String] = ["CODEX_HOME": "/tmp/codexbar-keepalive-tests/a"],
+        authFingerprint: String = "fingerprint-a",
+        accountID: String? = "account-a",
+        isAPIKeyLogin: Bool = false) -> UsageStore.CodexWindowKeepAliveAuthority
+    {
+        UsageStore.CodexWindowKeepAliveAuthority(
+            environment: environment,
+            authFingerprint: authFingerprint,
+            accountID: accountID,
+            isAPIKeyLogin: isAPIKeyLogin)
     }
 
     /// Selects an added (managed) account whose stored workspace differs from whatever its auth file names.
@@ -280,6 +405,7 @@ struct CodexWindowKeepAliveTests {
         refreshCadenceIsManual: Bool = false,
         lowPowerModeEnabled: Bool = false,
         selectedManagedWorkspaceID: String? = nil,
+        authority: UsageStore.CodexWindowKeepAliveAuthority? = Self.authority(),
         attemptedBoundaries: Set<Date> = [],
         refreshedSnapshot: UsageSnapshot? = Self.snapshot(primaryResetsAt: Self.resetsAt),
         refreshStartedAt: Date = Self.refreshStartedAt,
@@ -292,6 +418,7 @@ struct CodexWindowKeepAliveTests {
             refreshCadenceIsManual: refreshCadenceIsManual,
             lowPowerModeEnabled: lowPowerModeEnabled,
             selectedManagedWorkspaceID: selectedManagedWorkspaceID,
+            authority: authority,
             attemptedBoundaries: attemptedBoundaries,
             refreshedSnapshot: refreshedSnapshot,
             refreshStartedAt: refreshStartedAt,

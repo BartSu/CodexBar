@@ -81,16 +81,26 @@ read_when:
   (`Sources/CodexBarCore/Providers/Codex/CodexWindowKeepAlive.swift`), then refreshes Codex a few seconds later.
 - Skipped when the toggle is off, Codex is disabled, Refresh is set to Manual (no reset-boundary task exists, so
   the toggle is greyed out and explains itself), the resolved Background Work Low Power Mode preference is on, an
-  added (managed) workspace account is selected, the same boundary was already pinged, no Codex snapshot exists,
+  added (managed) workspace account is selected, the selected `CODEX_HOME` has no readable ChatGPT login, that
+  login is an `OPENAI_API_KEY`, the same boundary was already pinged, no Codex snapshot exists,
   the boundary pass did not publish a *fresh* Codex snapshot (a failed fetch keeps the prior one, which proves
   nothing about the current window), or the refreshed reset is already more than a minute past the expired
   boundary (a new window already started on its own). Decision logic is the pure
   `UsageStore.codexWindowKeepAliveSkipReason(...)`.
+- `UsageStore.lastSnapshotPublicationAt[.codex]` is stamped only by successful publications: the ordinary
+  `refreshProvider` success path and the stacked-layout selected-account path
+  (`applySelectedCodexVisibleAccountOutcome`). Preserved, hydrated, or failed publications never stamp it.
 - Workspace admission mirrors `CodexOAuthNativeRefreshCLIStrategy`: `codex exec` only receives `CODEX_HOME`, so it
   would bill whatever workspace `auth.json` names rather than the selected one. Any non-nil
   `managedWorkspaceAccountID` keeps the ping off.
-- Consent is re-checked on the main actor right before the CLI launches: turning the toggle off (which also cancels
-  the queued task) or switching the selected Codex account after the boundary fired drops the pending request.
+- Subscription only: the ping spends the ChatGPT subscription's 5-hour window and nothing else. API key logins have
+  no such window and would be billed per request, so `apiKeyLoginUnsupported` keeps them off; a home with no
+  readable login fails closed (`loginUnavailable`).
+- The admitted login is bound to the request. `CodexWindowKeepAliveAuthority` captures the fetch environment, the
+  SHA-256 of `auth.json`, and the account ID when the boundary admits the ping; right before the CLI launches the
+  main actor re-reads the current login and drops the request unless consent is still on and the authority is
+  identical. Turning the toggle off (which also cancels the queued task), switching the selected Codex account,
+  or replacing the login inside the same `CODEX_HOME` all prevent the request from spending a different account.
 - The ping uses the same executable resolution, launch-failure cooldown, and selected-account `CODEX_HOME`
   environment as the RPC usage source, runs in a scratch directory outside any repository, and is bounded by a
   two-minute timeout. One ping per reset costs one small request and writes one short Codex session log.
