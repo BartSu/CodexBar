@@ -1,7 +1,7 @@
-import CodexBarCore
 import Foundation
 import Testing
 @testable import CodexBar
+@testable import CodexBarCore
 
 struct CodexWindowKeepAliveTests {
     private static let resetsAt = Date(timeIntervalSince1970: 1_700_000_000)
@@ -38,6 +38,7 @@ struct CodexWindowKeepAliveTests {
     }
 
     @Test
+    @MainActor
     func `keep-alive stays off by default`() {
         let settings = testSettingsStore(suiteName: "CodexWindowKeepAliveTests-default")
 
@@ -47,6 +48,7 @@ struct CodexWindowKeepAliveTests {
     }
 
     @Test
+    @MainActor
     func `setting persists to user defaults`() throws {
         let defaults = try #require(UserDefaults(suiteName: "CodexWindowKeepAliveTests-persist-\(UUID().uuidString)"))
         let settings = testSettingsStore(suiteName: "CodexWindowKeepAliveTests-persist", userDefaults: defaults)
